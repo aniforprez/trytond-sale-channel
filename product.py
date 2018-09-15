@@ -192,7 +192,7 @@ class ProductSaleChannelListing(ModelSQL, ModelView):
     ], 'State', required=True, select=True)
     channel_source = fields.Function(
         fields.Char("Channel Source"),
-        getter="on_change_with_channel_source"
+        getter="get_channel_source"
     )
 
     quantity = fields.Function(
@@ -232,17 +232,31 @@ class ProductSaleChannelListing(ModelSQL, ModelView):
             ('product_identifier',) + tuple(clause[1:]),
         ]
 
-    def get_unit_digits(self, name):
-        if self.product:
-            self.product.default_uom.digits
-        return 2
+    @classmethod
+    def get_unit_digits(cls, records, name):
+        cursor = Transaction().connection.cursor()
 
-    def get_listing_url(self, name):
+        query = """
+            select
+                listing.id, product_uom.digits
+            from
+                product_product_channel_listing as listing
+            join product_product on product_product.id = listing.product
+            join product_uom on product_uom.id = product_product.default_uom
+            where listing.id = ANY(%s)
+        """
+
+        cursor.execute(query, (map(int, records), ))
+
+        return dict(cursor.fetchall())
+
+    @classmethod
+    def get_listing_url(cls, records, name):
         """
         Downstream modules should implement this function
         and return a valid url
         """
-        return None
+        return dict.fromkeys([r.id for r in records])
 
     @classmethod
     def get_availability_fields(cls, listings, names):
@@ -263,6 +277,15 @@ class ProductSaleChannelListing(ModelSQL, ModelView):
                 )
                 values['quantity'][listing.id] = availability.get('quantity')
         return values
+
+    @classmethod
+    def get_channel_source(cls, records, name):
+        result = {
+            r.id: r.channel.source
+            for r in records
+        }
+
+        return result
 
     @fields.depends('channel')
     def on_change_with_channel_source(self, name=None):
